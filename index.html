@@ -1,0 +1,269 @@
+﻿<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Predicción de Dibujos Feos 🎨</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            text-align: center;
+            font-family: 'Poppins', sans-serif;
+            background: #f5f5f5;
+            color: #222;
+            margin-top: 30px;
+        }
+
+        h1 {
+            font-size: 28px;
+        }
+
+        canvas {
+            border: 3px solid #333;
+            border-radius: 8px;
+            background: white;
+            cursor: crosshair;
+            margin-top: 15px;
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            border: none;
+            background-color: #0078ff;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: 0.3s;
+        }
+
+            button:hover {
+                background-color: #005ec2;
+            }
+
+        #resultado {
+            font-size: 22px;
+            margin-top: 20px;
+            color: #444;
+        }
+
+        #status {
+            margin-top: 10px;
+            font-size: 16px;
+            color: #0078ff;
+        }
+        
+        #debug {
+         margin-top: 20px;
+  font-size: 14px;
+         color: #666;
+        }
+        
+        #preview {
+          margin-top: 10px;
+       border: 1px solid #ccc;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🖍️ Predicción de Dibujos Feos</h1>
+    <canvas id="canvas" width="280" height="280"></canvas><br>
+
+    <button id="limpiarBtn">🧽 Limpiar</button>
+    <button id="predecirBtn" disabled>🤖 Predecir</button>
+
+    <div id="resultado">Dibuja algo...</div>
+    <div id="status">Cargando modelo...</div>
+    
+    <!-- Agregar canvas de preview para debugging -->
+    <div id="debug">
+        <p>Imagen procesada (28x28):</p>
+        <canvas id="preview" width="140" height="140"></canvas>
+    </div>
+
+    <script>
+  let model;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const resultado = document.getElementById('resultado');
+ const status = document.getElementById('status');
+        const previewCanvas = document.getElementById('preview');
+        const previewCtx = previewCanvas.getContext('2d');
+
+        // --- Inicializar el lienzo ---
+  ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 18;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "black";
+
+        let dibujando = false;
+
+     canvas.addEventListener("mousedown", (e) => {
+        dibujando = true;
+       const rect = canvas.getBoundingClientRect();
+       ctx.beginPath();
+ ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+     });
+ canvas.addEventListener("mouseup", () => dibujando = false);
+        canvas.addEventListener("mousemove", dibujar);
+
+        function dibujar(e) {
+ if (!dibujando) return;
+       const rect = canvas.getBoundingClientRect();
+      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+            ctx.stroke();
+        }
+
+        // --- Limpiar lienzo ---
+     document.getElementById('limpiarBtn').addEventListener('click', () => {
+        ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+         ctx.beginPath();
+    resultado.textContent = "Dibuja algo...";
+      
+         // Limpiar preview también
+            previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    });
+
+   // --- Cargar modelo (CORREGIDO) ---
+    async function cargarModelo() {
+      try {
+      status.textContent = "Cargando modelo...";
+     document.getElementById('predecirBtn').disabled = true;
+     
+                // INTENTO 1: Cargar como Keras model
+       try {
+  model = await tf.loadLayersModel('./model.json');
+        status.textContent = "✅ Modelo Keras cargado correctamente.";
+ } catch (kerasError) {
+             console.log("No es un modelo Keras, intentando como GraphModel...");
+    
+        // INTENTO 2: Cargar como SavedModel convertido
+            model = await tf.loadGraphModel('./model.json');
+        status.textContent = "✅ Modelo GraphModel cargado correctamente.";
+     }
+     
+       document.getElementById('predecirBtn').disabled = false;
+     console.log("Modelo cargado:", model);
+                
+                // Mostrar información del modelo
+              if (model.inputs) {
+         console.log("Inputs del modelo:", model.inputs);
+        console.log("Outputs del modelo:", model.outputs);
+      }
+    
+     } catch (error) {
+                console.error("Error detallado al cargar el modelo:", error);
+      status.innerHTML = `❌ Error: ${error.message}<br><small>Verifica que model.json esté en la carpeta</small>`;
+  
+            // Mostrar ayuda después de unos segundos
+     setTimeout(() => {
+          status.innerHTML = `
+        ❌ Para solucionarlo:<br>
+  1. Asegúrate de tener model.json en la misma carpeta<br>
+     2. Usa un servidor HTTP: python -m http.server 8000<br>
+   3. O usa Live Server en VS Code<br>
+              4. Verifica que también estén los archivos .bin
+           `;
+    }, 3000);
+       }
+        }
+
+// --- Predecir dibujo (CORREGIDO) ---
+   document.getElementById('predecirBtn').addEventListener('click', async () => {
+   if (!model) {
+                alert("El modelo aún no se ha cargado.");
+           return;
+          }
+
+          try {
+    resultado.textContent = "🔮 Analizando...";
+                
+       // CORREGIDO: Mejorar el preprocesamiento
+         let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+       // Crear tensor y redimensionar a 28x28
+     let tensor = tf.browser.fromPixels(imgData, 1)
+            .resizeNearestNeighbor([28, 28]);
+    
+        // IMPORTANTE: Los modelos MNIST esperan fondo negro y dibujo blanco
+        // Invertir los colores: blanco -> negro, negro -> blanco
+  tensor = tf.scalar(255).sub(tensor);
+                
+     // Normalizar a [0,1]
+           tensor = tensor.toFloat().div(255.0);
+      
+  // Agregar dimensión de batch
+        tensor = tensor.expandDims(0);
+             
+console.log("Tensor shape:", tensor.shape);
+      console.log("Tensor min/max:", tf.min(tensor).dataSync()[0], tf.max(tensor).dataSync()[0]);
+                
+        // Mostrar preview de la imagen procesada
+          const tensorData = await tensor.squeeze().data();
+       const imageData = previewCtx.createImageData(28, 28);
+             for (let i = 0; i < tensorData.length; i++) {
+                const value = Math.floor(tensorData[i] * 255);
+              imageData.data[i * 4] = value;   // R
+   imageData.data[i * 4 + 1] = value; // G
+           imageData.data[i * 4 + 2] = value; // B
+imageData.data[i * 4 + 3] = 255;   // A
+       }
+         previewCtx.putImageData(imageData, 0, 0);
+    
+         // Escalar el preview para que se vea mejor
+                previewCtx.imageSmoothingEnabled = false;
+     const tempCanvas = document.createElement('canvas');
+           tempCanvas.width = 28;
+                tempCanvas.height = 28;
+     const tempCtx = tempCanvas.getContext('2d');
+       tempCtx.putImageData(imageData, 0, 0);
+       
+       previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    previewCtx.drawImage(tempCanvas, 0, 0, 140, 140);
+
+     // Hacer predicción
+     let pred = model.predict(tensor);
+        let scores = await pred.data();
+        let classIdx = pred.argMax(1).dataSync()[0];
+          let confianza = (Math.max(...scores) * 100).toFixed(1);
+    
+         console.log("Scores completos:", scores);
+    console.log("Índice predicho:", classIdx);
+ console.log("Confianza:", confianza);
+
+const clases = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat', 'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot'];
+         
+  // Mostrar las 3 mejores predicciones
+                const indexedScores = scores.map((score, index) => ({score, index}))
+     .sort((a, b) => b.score - a.score)
+         .slice(0, 3);
+        
+      let resultText = `🔮 Predicción: <strong>${clases[classIdx]}</strong> (${confianza}%)<br>`;
+    resultText += `<small>Top 3:<br>`;
+      indexedScores.forEach((item, i) => {
+    const conf = (item.score * 100).toFixed(1);
+         resultText += `${i+1}. ${clases[item.index]}: ${conf}%<br>`;
+                });
+    resultText += `</small>`;
+    
+        resultado.innerHTML = resultText;
+      
+     // Limpiar memoria
+         tensor.dispose();
+          pred.dispose();
+          
+     } catch (error) {
+console.error("Error en la predicción:", error);
+       resultado.textContent = `❌ Error al predecir: ${error.message}`;
+    }
+        });
+
+        // Ejecutar carga del modelo
+   cargarModelo();
+ </script>
+</body>
+</html>
